@@ -28,7 +28,7 @@ handle, pid = uv.spawn(exepath,
                        exit_cb)
 
 uv.read_start(stdout, function (err, chunk)
-  safe_print("stdout",chunk, err)
+  --safe_print("stdout",chunk, err)
   if not err then
     on_stdout(chunk)
   end
@@ -65,9 +65,15 @@ function on_stdout(chunk)
   if not state then safe_print(err) end
 end
 
+pending = {}
 function on_msg(bytes)
   msg = a.nvim_call_function('json_decode', {bytes})
   safe_print(vim.inspect(msg))
+  if msg.id ~= nil then
+    mycb = pending[msg.id]
+    pending[msg.id] = nil
+    return mycb(msg)
+  end
 end
 
 function do_req(method, params,cb)
@@ -75,6 +81,7 @@ function do_req(method, params,cb)
   _G.theid = _G.theid + 1
   uv.write(stdin, wmsg(method, params, my_id))
   --safe_print("REQ " ..my_id.. " "..method)
+  pending[my_id] = cb
 end
 
 function do_notify(method, params)
@@ -93,13 +100,31 @@ function do_init()
     rootUri = 'file://' .. uv.cwd(),
     capabilities = capabilities,
   }
-  do_req("initialize", p)
+  do_req("initialize", p, function(reply)
+    if reply.error then
+      error(reply.error.message)
+    end
+    _G.init_status = reply.result
+  end)
+end
+
+function do_open(bufnr)
+  local uri = "file://"..a.nvim_buf_get_name(bufnr)
+  local text = table.concat(a.nvim_buf_get_lines(bufnr, 0, -1, true), "\n")
+  if a.nvim_buf_get_option(bufnr, 'eol') then text = text..'\n' end
+  local version = a.nvim_buf_get_changedtick(bufnr)
+  local languageId = "c"
+  local params = {  textDocument = {uri=uri,text=text,version=version,languageId=languageId}}
+  safe_print(params)
+  do_notify("textDocument/didOpen", params)
 end
 
 if false then
 uv.write(stdin, "\n")
 do_init()
-do_req("blååååøg", {3})
+do_open(4)
+
+do_req("blååååøg", {3}, function (r) safe_print(r.error.message) end)
 --print(vim.inspect(uv))
 --uv.flush
 end
