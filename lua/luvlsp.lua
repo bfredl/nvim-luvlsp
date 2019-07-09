@@ -4,6 +4,9 @@ if _G.theid == nil then
   _G.theid = 0
 end
 
+local a = vim.api
+a = vim.api
+
 uv = vim.loop
 
 safe_print = vim.schedule_wrap((luadev and luadev.print) or print)
@@ -37,7 +40,7 @@ end)
 
 function wmsg(method,params,id)
   local msg = {jsonrpc = "2.0", method = method, params = params, id = id}
-  local bytes = vim.api.nvim_call_function('json_encode', {msg})
+  local bytes = a.nvim_call_function('json_encode', {msg})
   return 'Content-Length: ' .. bytes:len() ..'\r\n\r\n' ..bytes
 end
 
@@ -50,17 +53,20 @@ function on_stdout(chunk)
   line = string.sub(buffered,1,eol-1)
   space = string.find(line, " ")
   length = tonumber(string.sub(line,space+1))
+  -- TODO: can has Content-Type??
   if string.len(buffered) >= eol + 3 + length then
     local msg = buffered:sub(eol+2,eol+3+length)
     buffered = buffered:sub(eol+3+length+1)
     vim.schedule(function() on_msg(msg) end)
+    -- check again, very tailcall
+    return on_stdout('')
   end
   end)
   if not state then safe_print(err) end
 end
 
 function on_msg(bytes)
-  msg = vim.api.nvim_call_function('json_decode', {bytes})
+  msg = a.nvim_call_function('json_decode', {bytes})
   safe_print(vim.inspect(msg))
 end
 
@@ -75,8 +81,24 @@ function do_notify(method, params)
   uv.write(stdin, wmsg(method, params))
 end
 
+function do_init()
+  local capabilities = {
+    textDocument = {
+      publishDiagnostics={relatedInformation=true},
+      -- TODO: signatureInformation
+    },
+  }
+  local p = {
+    processId = uv.getpid(),
+    rootUri = 'file://' .. uv.cwd(),
+    capabilities = capabilities,
+  }
+  do_req("initialize", p)
+end
+
 if false then
 uv.write(stdin, "\n")
+do_init()
 do_req("blååååøg", {3})
 --print(vim.inspect(uv))
 --uv.flush
