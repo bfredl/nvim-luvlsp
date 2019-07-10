@@ -5,6 +5,7 @@ if _G.luvlsp == nil then
     theid = 0,
     buffered = '',
     pending = {},
+    shadow = {},
   }
 end
 local luvlsp = _G.luvlsp
@@ -67,6 +68,29 @@ function luvlsp.on_stdout(chunk)
   end
 end
 
+function splice(tab,start,stop,new,newend)
+  -- TODO: inefficient
+  for i = start,math.min(stop,newend) do
+    tab[i] = new[i-start+1]
+  end
+  print(vim.inspect(tab))
+  if stop > newend then
+    for _ = 1, (stop-newend) do
+      table.remove(tab,newend+1)
+    end
+  else
+    for i = 1, (newend-stop) do
+      table.insert(tab,stop+i,new[i+(stop-start)+1])
+    end
+  end
+  return tab
+end
+
+if false then
+splice({1,2,3,4,5},2,1,{"x","y"},3)
+end
+
+
 function luvlsp.on_msg(bytes)
   local msg = a.nvim_call_function('json_decode', {bytes})
   luvlsp.d(vim.inspect(msg))
@@ -111,16 +135,23 @@ function luvlsp.do_change(_, bufnr, tick, start, stop, stopped)
   local uri = "file://"..a.nvim_buf_get_name(bufnr)
   local version = tick
   local textDocument = {uri=uri,version=version}
-  local text = table.concat(a.nvim_buf_get_lines(bufnr, start, stopped, true), "\n") .. "\n"
+  local lines = a.nvim_buf_get_lines(bufnr, start, stopped, true)
+  local text = table.concat(lines, "\n") .. "\n"
   local range = {start={line=start,character=0},["end"]={line=stop,character=0}}
-  -- what is rangeLength ???
-  local edit = {range=range, text=text}
+  local rangeLength = 0
+  local shadow = luvlsp.shadow[bufnr]
+  for i = start+1,stopped do
+    rangeLength = rangeLength + string.len(shadow[i]) + 1
+  end
+  local edit = {range=range, text=text}--, rangeLength=rangeLength}
+  splice(shadow, start+1,stop,lines,stopped)
   luvlsp.msg("textDocument/didChange", {textDocument=textDocument, contentChanges={edit}})
 end
 
 function luvlsp.do_open(bufnr)
   local uri = "file://"..a.nvim_buf_get_name(bufnr)
-  local text = table.concat(a.nvim_buf_get_lines(bufnr, 0, -1, true), "\n")
+  luvlsp.shadow[bufnr] = a.nvim_buf_get_lines(bufnr, 0, -1, true)
+  local text = table.concat(luvlsp.shadow[bufnr], "\n")
   if a.nvim_buf_get_option(bufnr, 'eol') then text = text..'\n' end
   local version = a.nvim_buf_get_changedtick(bufnr)
   local languageId = "c"
