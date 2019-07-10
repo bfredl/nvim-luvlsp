@@ -1,4 +1,5 @@
-do local s, l = pcall(require,'luadev') if s then luadev = l end end
+do local s, l = pcall(require,'luadev') if s then _G.luadev = l end end
+local luadev = _G.luadev
 
 _G.a = vim.api
 _G.uv = vim.loop
@@ -210,8 +211,4 @@ function luvlsp.check_file(bufnr)
   end
 end
 
-if false then
-luvlsp.init()
-luvlsp.start()
-end
-
+return luvlsp
