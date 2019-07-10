@@ -26,6 +26,9 @@ else
   luvlsp.schedule = vim.schedule
 end
 
+luvlsp.vim_ft = "c"
+luvlsp.lsp_languageId = "c"
+
 function luvlsp.spawn()
   local stdin, stdout, stderr = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
 
@@ -100,7 +103,7 @@ function luvlsp.req(method, params, cb)
   --luvlsp.d("REQ " ..my_id.. " "..method)
 end
 
-function luvlsp.init()
+function luvlsp.init(cb)
   luvlsp.spawn()
   local capabilities = {
     textDocument = {
@@ -118,7 +121,8 @@ function luvlsp.init()
     if reply.error then
       error(reply.error.message)
     end
-    _G.init_status = reply.result
+    luvlsp.init_result = reply.result
+    if cb then cb() end
   end)
 end
 
@@ -144,8 +148,7 @@ function luvlsp.do_open(bufnr)
   if a.nvim_buf_get_option(bufnr, 'eol') then text = text..'\n' end
   luvlsp.shadow[bufnr] = a.nvim_buf_get_offset(bufnr,a.nvim_buf_line_count(bufnr))
   local version = a.nvim_buf_get_changedtick(bufnr)
-  local languageId = "c"
-  local params = {textDocument = {uri=uri,text=text,version=version,languageId=languageId}}
+  local params = {textDocument = {uri=uri,text=text,version=version,languageId=luvlsp.lsp_languageId}}
   luvlsp.d(params)
   luvlsp.msg("textDocument/didOpen", params)
   a.nvim_buf_attach(bufnr, false, {on_lines=function(...) luvlsp.do_change(...) end})
@@ -184,14 +187,31 @@ function luvlsp.on_diag(params)
     a.nvim_buf_add_highlight(bufnr, luvlsp.ns, loc_hl, range.start.line, range.start.character, range._end.character)
     ::continue::
   end
-
 end
+
+function luvlsp.start()
+  luvlsp.init(function()
+    a.nvim_command("au FileType "..luvlsp.vim_ft.." lua luvlsp.check_file()")
+    local bufs = a.nvim_list_bufs()
+    for _, b in ipairs(bufs) do
+      if a.nvim_buf_get_option(b, "ft") == luvlsp.vim_ft then
+        luvlsp.check_file(b)
+      end
+    end
+  end)
+end
+
+function luvlsp.check_file(bufnr)
+  if bufnr == nil then
+    bufnr = a.nvim_get_current_buf()
+  end
+  if luvlsp.shadow[bufnr] == nil then
+    luvlsp.do_open(bufnr)
+  end
+end
+
 if false then
 luvlsp.init()
-luvlsp.do_open(2)
-
-luvlsp.req("blååååøg", {3}, function(r) luvlsp.d(r.error.message) end)
---print(vim.inspect(uv))
---uv.flush
+luvlsp.start()
 end
 
