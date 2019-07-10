@@ -107,7 +107,7 @@ function luvlsp.init()
   end)
 end
 
-function luvlsp.do_change(bufnr, tick, start, stop, stopped)
+function luvlsp.do_change(_, bufnr, tick, start, stop, stopped)
   local uri = "file://"..a.nvim_buf_get_name(bufnr)
   local version = tick
   local textDocument = {uri=uri,version=version}
