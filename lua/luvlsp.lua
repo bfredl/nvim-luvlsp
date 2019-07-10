@@ -17,7 +17,14 @@ if _G.luvlsp == nil then
 end
 local luvlsp = _G.luvlsp
 
-luvlsp.d = vim.schedule_wrap((luadev and luadev.print) or print)
+if luadev then
+  luadev.create_buf()
+  luvlsp.d = vim.schedule_wrap(luadev.print)
+  luvlsp.schedule = function(cb) vim.schedule(luadev.err_wrap(cb)) end
+else
+  luvlsp.d = vim.schedule_wrap(print)
+  luvlsp.schedule = vim.schedule
+end
 
 function luvlsp.spawn()
   local stdin, stdout, stderr = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
@@ -64,43 +71,23 @@ function luvlsp.on_stdout(chunk)
   if string.len(luvlsp.buffered) >= eol + 3 + length then
     local msg = luvlsp.buffered:sub(eol+2,eol+3+length)
     luvlsp.buffered = luvlsp.buffered:sub(eol+3+length+1)
-    vim.schedule(function() luvlsp.on_msg(msg) end)
+    luvlsp.schedule(function() luvlsp.on_msg(msg) end)
     -- check again, very tailcall
     return luvlsp.on_stdout('')
   end
 end
 
-function luvlsp.splice(tab,start,stop,new,newend)
-  -- TODO: inefficient
-  for i = start,math.min(stop,newend) do
-    tab[i] = new[i-start+1]
-  end
-  if stop > newend then
-    for _ = 1, (stop-newend) do
-      table.remove(tab,newend+1)
-    end
-  else
-    for i = 1, (newend-stop) do
-      table.insert(tab,stop+i,new[i+(stop-start)+1])
-    end
-  end
-  return tab
-end
-
-if false then
-luvlsp.splice({1,2,3,4,5},2,1,{"x","y"},3)
-end
-
-
 function luvlsp.on_msg(bytes)
   local msg = a.nvim_call_function('json_decode', {bytes})
-  luvlsp.d(vim.inspect(msg))
   if msg.id ~= nil then
+    luvlsp.d(vim.inspect(msg))
     local mycb = luvlsp.pending[msg.id]
     luvlsp.pending[msg.id] = nil
     return mycb(msg)
   elseif msg.method == "textDocument/publishDiagnostics" then
     luvlsp.on_diag(msg.params)
+  else
+    luvlsp.d(vim.inspect(msg))
   end
 end
 
@@ -142,22 +129,20 @@ function luvlsp.do_change(_, bufnr, tick, start, stop, stopped)
   local lines = a.nvim_buf_get_lines(bufnr, start, stopped, true)
   local text = table.concat(lines, "\n") .. "\n"
   local range = {start={line=start,character=0},["end"]={line=stop,character=0}}
-  local rangeLength = 0
-  local shadow = luvlsp.shadow[bufnr]
-  for i = start+1,stopped do
-    rangeLength = rangeLength + string.len(shadow[i]) + 1
-  end
-  local edit = {range=range, text=text}--, rangeLength=rangeLength}
-  luvlsp.splice(shadow, start+1,stop,lines,stopped)
+  local shadowlen = a.nvim_buf_get_offset(bufnr,a.nvim_buf_line_count(bufnr))
+  -- TODO: this is not recessary for clangd? check also with some other server.
+  local rangeLength = string.len(text) + (luvlsp.shadow[bufnr] - shadowlen)
+  luvlsp.shadow[bufnr] = shadowlen
+  local edit = {range=range, text=text, rangeLength=rangeLength}
   luvlsp.msg("textDocument/didChange", {textDocument=textDocument, contentChanges={edit}})
 end
 
 function luvlsp.do_open(bufnr)
   local uri = "file://"..a.nvim_buf_get_name(bufnr)
   luvlsp.bufmap[uri] = bufnr
-  luvlsp.shadow[bufnr] = a.nvim_buf_get_lines(bufnr, 0, -1, true)
-  local text = table.concat(luvlsp.shadow[bufnr], "\n")
+  local text = table.concat(a.nvim_buf_get_lines(bufnr, 0, -1, true), "\n")
   if a.nvim_buf_get_option(bufnr, 'eol') then text = text..'\n' end
+  luvlsp.shadow[bufnr] = a.nvim_buf_get_offset(bufnr,a.nvim_buf_line_count(bufnr))
   local version = a.nvim_buf_get_changedtick(bufnr)
   local languageId = "c"
   local params = {textDocument = {uri=uri,text=text,version=version,languageId=languageId}}
