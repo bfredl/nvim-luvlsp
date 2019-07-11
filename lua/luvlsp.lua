@@ -132,7 +132,7 @@ function luvlsp.do_change(_, bufnr, tick, start, stop, stopped)
   local version = tick
   local textDocument = {uri=uri,version=version}
   local lines = a.nvim_buf_get_lines(bufnr, start, stopped, true)
-  local text = table.concat(lines, "\n") .. "\n"
+  local text = table.concat(lines, "\n") .. ((stopped > start) and "\n" or "")
   local range = {start={line=start,character=0},["end"]={line=stop,character=0}}
   local shadowlen = a.nvim_buf_get_offset(bufnr,a.nvim_buf_line_count(bufnr))
   -- TODO: this is not recessary for clangd? check also with some other server.
