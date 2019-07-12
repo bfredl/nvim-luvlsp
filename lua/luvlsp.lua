@@ -15,7 +15,7 @@ if _G.luvlsp == nil then
     pending = {},
     shadow = {},
     bufmap = {},
-    ns = a.nvim_create_namespace("luvlsp"),
+    msg_handlers = {},
   }
 end
 local luvlsp = _G.luvlsp
@@ -57,7 +57,6 @@ function luvlsp.spawn()
   uv.read_start(luvlsp.stderr, function (err, chunk)
     luvlsp.d("stderr",chunk, err)
   end)
-
 end
 
 function luvlsp.msg(method,params,id)
@@ -91,13 +90,12 @@ function luvlsp.on_msg(bytes)
     local mycb = luvlsp.pending[msg.id]
     luvlsp.pending[msg.id] = nil
     return mycb(msg)
-  elseif msg.method == "textDocument/publishDiagnostics" then
-    luvlsp.on_diag(msg.params)
+  elseif luvlsp.msg_handlers[msg.method] then
+    luvlsp.msg_handlers[msg.method](msg)
   else
     luvlsp.d(vim.inspect(msg))
   end
 end
-
 
 function luvlsp.req(method, params, cb)
   local my_id = luvlsp.theid
@@ -110,10 +108,7 @@ end
 function luvlsp.init(cb)
   luvlsp.spawn()
   local capabilities = {
-    textDocument = {
-      publishDiagnostics={relatedInformation=true},
-      -- TODO: signatureInformation
-    },
+    textDocument = require'luvlsp.feat'.textDocument_caps,
     offsetEncoding = {'utf-8'}, -- what is WCHAR?
   }
   local p = {
@@ -158,40 +153,6 @@ function luvlsp.do_open(bufnr)
   a.nvim_buf_attach(bufnr, false, {on_lines=function(...) luvlsp.do_change(...) end})
 end
 
-
-function luvlsp.on_diag(params)
-  local MessageType = { Error = 1, Warning = 2, Info = 3, Log = 4 }
-  local bufnr = luvlsp.bufmap[params.uri]
-  a.nvim_buf_clear_highlight(bufnr, luvlsp.ns, 0, -1)
-  local last_line, last_severity = -1, -1
-  for _, msg in ipairs(params.diagnostics) do
-    local range = msg.range
-    range._end = range['end']
-    if range._end.line ~= range.start.line then
-      range._end.line = range.start.line
-      range._end.character = -1
-    end
-
-    if last_line == range.start.line and msg.severity > last_severity then
-      goto continue
-    end
-    last_line, last_severity = range.start.line, msg.severity
-
-    local msg_hl
-    if msg.severity == MessageType.Error then
-      msg_hl = "LspError"
-    elseif msg.severity == MessageType.Warning then
-      msg_hl = "LspWarning"
-    else
-      msg_hl = "LspOtherMsg"
-    end
-    a.nvim_buf_set_virtual_text(bufnr, luvlsp.ns, range.start.line, {{'▶ '..msg.message, msg_hl}}, {})
-
-    local loc_hl = "LspLocation"
-    a.nvim_buf_add_highlight(bufnr, luvlsp.ns, loc_hl, range.start.line, range.start.character, range._end.character)
-    ::continue::
-  end
-end
 
 function luvlsp.start()
   luvlsp.init(function()
