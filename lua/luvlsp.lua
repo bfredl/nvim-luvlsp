@@ -1,3 +1,5 @@
+-- luacheck: globals vim
+
 do local s, l = pcall(require,'luadev') if s then _G.luadev = l end end
 local luadev = _G.luadev
 
@@ -55,6 +57,8 @@ function luvlsp.spawn()
   end)
 
   luvlsp.stdin = stdin
+  luvlsp.stdout = stdout
+  luvlsp.stderr = stderr
 end
 
 function luvlsp.msg(method,params,id)
@@ -193,6 +197,7 @@ end
 function luvlsp.start()
   luvlsp.init(function()
     a.nvim_command("au FileType "..luvlsp.vim_ft.." lua luvlsp.check_file()")
+    a.nvim_command("au VimLeavePre "..luvlsp.vim_ft.." lua luvlsp.close()")
     local bufs = a.nvim_list_bufs()
     for _, b in ipairs(bufs) do
       if a.nvim_buf_get_option(b, "ft") == luvlsp.vim_ft then
@@ -209,6 +214,13 @@ function luvlsp.check_file(bufnr)
   if luvlsp.shadow[bufnr] == nil then
     luvlsp.do_open(bufnr)
   end
+end
+
+function luvlsp.close()
+  luvlsp.req("shutdown", nil, function() end)
+  uv.read_stop(luvlsp.stdout)
+  uv.read_stop(luvlsp.stderr)
+  uv.shutdown(luvlsp.stdin, uv.close(luvlsp.handle, luvlsp.d("close")))
 end
 
 return luvlsp
