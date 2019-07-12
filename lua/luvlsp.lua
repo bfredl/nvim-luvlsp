@@ -29,36 +29,35 @@ else
   luvlsp.schedule = vim.schedule
 end
 
+luvlsp.exepath = "clangd"
+luvlsp.args = {}
 luvlsp.vim_ft = "c"
 luvlsp.lsp_languageId = "c"
 
 function luvlsp.spawn()
-  local stdin, stdout, stderr = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
+  luvlsp.stdin = uv.new_pipe(false)
+  luvlsp.stdout = uv.new_pipe(false)
+  luvlsp.stderr = uv.new_pipe(false)
 
   local function exit_cb()
     luvlsp.d("very exit")
   end
 
-  local exepath = "clangd"
-  local args = {}
+  local stdio = {luvlsp.stdin,luvlsp.stdout,luvlsp.stderr}
+  local opts = {args=luvlsp.args, stdio=stdio}
+  luvlsp.handle, luvlsp.pid = uv.spawn(luvlsp.exepath, opts, exit_cb)
 
-  local opts = {args=args, stdio={stdin,stdout,stderr}}
-  luvlsp.handle, luvlsp.pid = uv.spawn(exepath, opts, exit_cb)
-
-  uv.read_start(stdout, function (err, chunk)
+  uv.read_start(luvlsp.stdout, function (err, chunk)
     --luvlsp.d("stdout",chunk, err)
     if not err then
       luvlsp.on_stdout(chunk)
     end
   end)
 
-  uv.read_start(stderr, function (err, chunk)
+  uv.read_start(luvlsp.stderr, function (err, chunk)
     luvlsp.d("stderr",chunk, err)
   end)
 
-  luvlsp.stdin = stdin
-  luvlsp.stdout = stdout
-  luvlsp.stderr = stderr
 end
 
 function luvlsp.msg(method,params,id)
@@ -197,7 +196,7 @@ end
 function luvlsp.start()
   luvlsp.init(function()
     a.nvim_command("au FileType "..luvlsp.vim_ft.." lua luvlsp.check_file()")
-    a.nvim_command("au VimLeavePre "..luvlsp.vim_ft.." lua luvlsp.close()")
+    a.nvim_command("au VimLeavePre * lua luvlsp.close()")
     local bufs = a.nvim_list_bufs()
     for _, b in ipairs(bufs) do
       if a.nvim_buf_get_option(b, "ft") == luvlsp.vim_ft then
@@ -218,9 +217,15 @@ end
 
 function luvlsp.close()
   luvlsp.req("shutdown", nil, function() end)
-  uv.read_stop(luvlsp.stdout)
-  uv.read_stop(luvlsp.stderr)
-  uv.shutdown(luvlsp.stdin, uv.close(luvlsp.handle, luvlsp.d("close")))
+  luvlsp.msg("exit", nil)
+  uv.shutdown(luvlsp.stdin, function()
+    -- TODO: if closing LSP before nvim exits, we should delay this
+    -- to receive any final stdout/stderr
+    uv.close(luvlsp.stdout)
+    uv.close(luvlsp.stderr)
+    uv.close(luvlsp.stdin)
+    uv.close(luvlsp.handle)
+  end)
 end
 
 return luvlsp
