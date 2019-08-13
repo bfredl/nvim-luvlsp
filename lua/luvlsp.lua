@@ -29,10 +29,17 @@ else
   luvlsp.schedule = vim.schedule
 end
 
-luvlsp.exepath = "clangd"
-luvlsp.args = {}
-luvlsp.vim_ft = "c"
-luvlsp.lsp_languageId = "c"
+if _G.luvlsp_config ~= nil then
+  luvlsp.config = _G.luvlsp_config
+else
+  luvlsp.config  = {
+    exepath = "clangd",
+    --exepath = "/home/bjorn/dev/llvm-project/build/bin/clangd"
+    args = {},
+    vim_ft = "c",
+    lsp_languageId = "c"
+  }
+end
 
 function luvlsp.spawn()
   luvlsp.stdin = uv.new_pipe(false)
@@ -44,8 +51,8 @@ function luvlsp.spawn()
   end
 
   local stdio = {luvlsp.stdin,luvlsp.stdout,luvlsp.stderr}
-  local opts = {args=luvlsp.args, stdio=stdio}
-  luvlsp.handle, luvlsp.pid = uv.spawn(luvlsp.exepath, opts, exit_cb)
+  local opts = {args=luvlsp.config.args, stdio=stdio}
+  luvlsp.handle, luvlsp.pid = uv.spawn(luvlsp.config.exepath, opts, exit_cb)
 
   uv.read_start(luvlsp.stdout, function (err, chunk)
     --luvlsp.d("stdout",chunk, err)
@@ -147,7 +154,7 @@ function luvlsp.do_open(bufnr)
   if a.nvim_buf_get_option(bufnr, 'eol') then text = text..'\n' end
   luvlsp.shadow[bufnr] = a.nvim_buf_get_offset(bufnr,a.nvim_buf_line_count(bufnr))
   local version = a.nvim_buf_get_changedtick(bufnr)
-  local params = {textDocument = {uri=uri,text=text,version=version,languageId=luvlsp.lsp_languageId}}
+  local params = {textDocument = {uri=uri,text=text,version=version,languageId=luvlsp.config.lsp_languageId}}
   luvlsp.d(params)
   luvlsp.msg("textDocument/didOpen", params)
   a.nvim_buf_attach(bufnr, false, {on_lines=function(...) luvlsp.do_change(...) end})
@@ -156,11 +163,11 @@ end
 
 function luvlsp.start()
   luvlsp.init(function()
-    a.nvim_command("au FileType "..luvlsp.vim_ft.." lua luvlsp.check_file()")
+    a.nvim_command("au FileType "..luvlsp.config.vim_ft.." lua luvlsp.check_file()")
     a.nvim_command("au VimLeavePre * lua luvlsp.close()")
     local bufs = a.nvim_list_bufs()
     for _, b in ipairs(bufs) do
-      if a.nvim_buf_get_option(b, "ft") == luvlsp.vim_ft then
+      if a.nvim_buf_get_option(b, "ft") == luvlsp.config.vim_ft then
         luvlsp.check_file(b)
       end
     end
