@@ -116,7 +116,7 @@ function luvlsp.init(cb)
   luvlsp.spawn()
   local capabilities = {
     textDocument = require'luvlsp.feat'.textDocument_caps,
-    offsetEncoding = {'utf-8'}, -- what is WCHAR?
+    offsetEncoding = {'utf-8', 'utf-16'},
   }
   local p = {
     processId = uv.getpid(),
@@ -128,22 +128,20 @@ function luvlsp.init(cb)
       error(reply.error.message)
     end
     luvlsp.init_result = reply.result
+    luvlsp.is_utf8 = (reply.result.offsetEncoding == "utf-8")
     if cb then cb() end
   end)
 end
 
-function luvlsp.do_change(_, bufnr, tick, start, stop, stopped)
+function luvlsp.do_change(_, bufnr, tick, start, stop, stopped, bytes, _, units)
   local uri = "file://"..a.nvim_buf_get_name(bufnr)
   local version = tick
   local textDocument = {uri=uri,version=version}
   local lines = a.nvim_buf_get_lines(bufnr, start, stopped, true)
   local text = table.concat(lines, "\n") .. ((stopped > start) and "\n" or "")
   local range = {start={line=start,character=0},["end"]={line=stop,character=0}}
-  local shadowlen = a.nvim_buf_get_offset(bufnr,a.nvim_buf_line_count(bufnr))
-  -- TODO: this is not recessary for clangd? check also with some other server.
-  local rangeLength = string.len(text) + (luvlsp.shadow[bufnr] - shadowlen)
-  luvlsp.shadow[bufnr] = shadowlen
-  local edit = {range=range, text=text, rangeLength=rangeLength}
+  local length = (luvlsp.is_utf8 and bytes) or units
+  local edit = {range=range, text=text, rangeLength=length}
   luvlsp.msg("textDocument/didChange", {textDocument=textDocument, contentChanges={edit}})
 end
 
@@ -152,12 +150,15 @@ function luvlsp.do_open(bufnr)
   luvlsp.bufmap[uri] = bufnr
   local text = table.concat(a.nvim_buf_get_lines(bufnr, 0, -1, true), "\n")
   if a.nvim_buf_get_option(bufnr, 'eol') then text = text..'\n' end
-  luvlsp.shadow[bufnr] = a.nvim_buf_get_offset(bufnr,a.nvim_buf_line_count(bufnr))
+  luvlsp.shadow[bufnr] = true
   local version = a.nvim_buf_get_changedtick(bufnr)
   local params = {textDocument = {uri=uri,text=text,version=version,languageId=luvlsp.config.lsp_languageId}}
   luvlsp.d(params)
   luvlsp.msg("textDocument/didOpen", params)
-  a.nvim_buf_attach(bufnr, false, {on_lines=function(...) luvlsp.do_change(...) end})
+  a.nvim_buf_attach(bufnr, false, {
+    on_lines=function(...) luvlsp.do_change(...) end,
+    utf_sizes=not luvlsp.is_utf8
+  })
 end
 
 
